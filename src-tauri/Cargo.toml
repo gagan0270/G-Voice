@@ -1,11 +1,11 @@
 [package]
-name = "handy"
+name = "g-voice"
 version = "0.9.8"
-description = "Handy"
-authors = ["cjpais"]
+description = "G-Voice - Offline Speech to Text"
+authors = ["Gagan V"]
 edition = "2021"
 license = "MIT"
-default-run = "handy"
+default-run = "g-voice"
 
 [profile.dev]
 incremental = true # Compile your binary in smaller steps.
@@ -16,7 +16,7 @@ incremental = true # Compile your binary in smaller steps.
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "handy_app_lib"
+name = "gvoice_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -54,12 +54,12 @@ env_filter = "0.1.0"
 tokio = "1.43.0"
 earshot = "1.2.2"
 enigo = "0.6.1"
-# Feedback sounds. No `recording`: microphone capture is handy-recorder's.
+# Microphone capture and audio processing
 rodio = { version = "0.23.0", default-features = false, features = ["playback", "wav", "flac", "mp3", "vorbis"] }
 # Decodes files for transcription. rodio's version, plus the M4A/MP4 (AAC,
 # ALAC) and AIFF support rodio leaves out.
 symphonia = { version = "0.5.5", features = ["aac", "alac", "isomp4", "mp3", "aiff"] }
-# Resamples a decoded file to 16 kHz; the version handy-recorder already uses.
+# Microphone capture and audio processing
 rubato = "5"
 handy-recorder = "0.1"
 reqwest = { version = "0.12", features = ["json", "stream", "gzip", "brotli", "deflate"] }
@@ -100,7 +100,6 @@ signal-hook = "0.3"
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-global-shortcut = "2.3.1"
 tauri-plugin-single-instance = "2.3.2"
-tauri-plugin-updater = "2.10.1"
 
 [target.'cfg(windows)'.dependencies]
 # Used to reach ICoreWebView2Settings3 through the webview's controller
@@ -133,14 +132,13 @@ winreg = "0.55"
 # buys nothing on ARM — ALL_VARIANTS is an x86 concept, so a DL build there is
 # just a single portable CPU module shipped as a DLL. So ARM links transcribe-cpp
 # STATICALLY (no features = static CPU-only): the one CPU backend is compiled into
-# handy.exe and we ship zero DLLs, which sidesteps the installer's per-DLL
+# G-Voice binary and we ship zero DLLs, which sidesteps the installer's per-DLL
 # signtool verify entirely. CI pins -DGGML_NATIVE=OFF (see build.yml) so the
 # static build targets a portable ARM baseline, not the build runner's CPU.
 [target.'cfg(all(windows, target_arch = "x86_64"))'.dependencies]
 transcribe-cpp = { version = "0.4.0", default-features = false, features = [
   "dynamic-backends",
-  "vulkan",
-] }
+  ] }
 
 [target.'cfg(all(windows, target_arch = "aarch64"))'.dependencies]
 transcribe-cpp = { version = "0.4.0", default-features = false }
@@ -171,8 +169,7 @@ gtk-layer-shell = { version = "0.8", features = ["v0_6"] }
 gtk = "0.18"
 transcribe-cpp = { version = "0.4.0", default-features = false, features = [
   "dynamic-backends",
-  "vulkan",
-] }
+  ] }
 
 # TEMPORARY: tao pinned past 0.35.3 for the Wayland client-side-decorations fix
 # (tao #1218, fixes tauri #11856 — dead titlebar buttons after visible(false) →
@@ -182,7 +179,7 @@ transcribe-cpp = { version = "0.4.0", default-features = false, features = [
 # tao #1231 (removed window subclassing), which left the thread event target's
 # WNDPROC falling through to DefSubclassProc. On a no-longer-subclassed window
 # that returns 0, so WM_QUERYENDSESSION answered FALSE and vetoed Windows
-# shutdown (Handy #1710). `handy` = 07f3742b + a cherry-pick of tao #1274
+# Windows shutdown fix
 # (DefSubclassProc → DefWindowProcW). Repoint at upstream once #1274 merges.
 #
 # tao-macros must be patched to the SAME rev even though nothing here depends on

@@ -4,9 +4,11 @@
       "id": "transcribe",
       "name": "Transcribe Keyboard Shortcut",
       "description": "Converts your speech into text.",
-      "default_binding": "Platform-specific: ctrl+space (Windows/Linux), alt+space (macOS)"
+      "default_binding": "Platform-specific: alt+c (Windows/Linux), opt+c (macOS)"
     }
   },
   "push_to_talk": true,
-  "selected_language": "auto"
+  "selected_language": "auto",
+  "model_unload_timeout": "never",
+  "autostart": true
 }

@@ -41,7 +41,7 @@ interface Persisted {
   lessons: { hold: boolean; tap: boolean };
   /** Set when All set's panel jumps back to a screen; continuing returns here. */
   returnTo: OnboardingStep | null;
-  /** Start Handy at login: set on All set, saved when they finish. */
+  /** Start G-Voice at login: set on All set, saved when they finish. */
   atLogin: boolean;
 }
 
@@ -57,7 +57,7 @@ interface OnboardingState extends Persisted {
   reset: (preview: boolean) => void;
 }
 
-const STORAGE_KEY = "handy.onboarding";
+const STORAGE_KEY = "gvoice.onboarding";
 
 const fresh = (): Persisted => ({
   step: "welcome",

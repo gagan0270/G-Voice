@@ -5,6 +5,10 @@ import { LANGUAGES } from "@/lib/constants/languages";
 declare global {
   interface Window {
     /** Injected before scripts run (`system_languages.rs`); absent in a browser. */
+    __GVOICE_SYSTEM_LANGUAGES__?: {
+      languages: string[];
+      chinese_script: ChineseScript | null;
+    };
     __HANDY_SYSTEM_LANGUAGES__?: {
       languages: string[];
       chinese_script: ChineseScript | null;
@@ -12,7 +16,7 @@ declare global {
   }
 }
 
-const system = () => window.__HANDY_SYSTEM_LANGUAGES__;
+const system = () => window.__GVOICE_SYSTEM_LANGUAGES__ || window.__HANDY_SYSTEM_LANGUAGES__;
 const locale = () => navigator.language || "en-US";
 
 export const isChinese = (code: string) => code === "zh" || code === "yue";

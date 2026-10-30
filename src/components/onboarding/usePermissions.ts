@@ -206,7 +206,7 @@ export const usePermissions = (preview: boolean): Permissions => {
     const unlisten = getCurrentWindow().onFocusChanged(({ payload }) => {
       if (payload) recheckWaiting();
     });
-    // Only while Handy is in front: away in Settings, the row keeps waiting.
+    // Only while G-Voice is in front: away in Settings, the row keeps waiting.
     const timer = setTimeout(() => {
       if (document.hasFocus()) recheckWaiting();
     }, WAITING_TIMEOUT_MS);
@@ -236,7 +236,7 @@ export const usePermissions = (preview: boolean): Permissions => {
         await commands.openMicrophonePrivacySettings();
       else {
         await requestMicrophonePermission();
-        // A prompt takes focus from Handy; still in front a moment later
+        // A prompt takes focus from G-Voice; still in front a moment later
         // means there was none (denied before), so go back to asking.
         setTimeout(() => {
           if (document.hasFocus()) recheckWaiting();

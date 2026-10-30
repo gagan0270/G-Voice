@@ -113,7 +113,9 @@ pub fn init<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     };
     let json = serde_json::to_string(&suggestion).expect("suggestion serializes");
     tauri::plugin::Builder::new("system-languages")
-        .js_init_script(format!("window.__HANDY_SYSTEM_LANGUAGES__ = {json};"))
+        .js_init_script(format!(
+            "window.__GVOICE_SYSTEM_LANGUAGES__ = {json}; window.__HANDY_SYSTEM_LANGUAGES__ = {json};"
+        ))
         .build()
 }
 
