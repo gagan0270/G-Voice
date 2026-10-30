@@ -1157,6 +1157,13 @@ pub fn run(cli_args: CliArgs) {
             }
             show_main_window(app);
         }
+        tauri::RunEvent::Exit => {
+            if let Some(hm) = app.try_state::<Arc<HistoryManager>>() {
+                if let Err(e) = hm.checkpoint_wal() {
+                    log::warn!("Failed to checkpoint history WAL on exit: {e}");
+                }
+            }
+        }
         // No transcription teardown on exit: transcribe.cpp runs only in the
         // worker process, which exits by itself as soon as this process's end
         // of its stdin closes, even if it is hung. Waiting on an unload here

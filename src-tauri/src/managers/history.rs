@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError};
 use tauri::AppHandle;
 use tauri_specta::Event;
 
@@ -87,6 +88,7 @@ pub struct HistoryManager {
     app_handle: AppHandle,
     recordings_dir: PathBuf,
     db_path: PathBuf,
+    conn: Mutex<Connection>,
 }
 
 /// A transcription's language as its two columns.
@@ -110,10 +112,15 @@ impl HistoryManager {
             debug!("Created recordings directory: {:?}", recordings_dir);
         }
 
+        let conn = Connection::open(&db_path)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
+
         let manager = Self {
             app_handle: app_handle.clone(),
             recordings_dir,
             db_path,
+            conn: Mutex::new(conn),
         };
 
         // Initialize database and run migrations synchronously
@@ -125,7 +132,7 @@ impl HistoryManager {
     fn init_database(&self) -> Result<()> {
         info!("Initializing database at {:?}", self.db_path);
 
-        let mut conn = Connection::open(&self.db_path)?;
+        let mut conn = self.conn();
 
         // Handle migration from tauri-plugin-sql to rusqlite_migration
         // tauri-plugin-sql used _sqlx_migrations table, rusqlite_migration uses user_version pragma
@@ -251,8 +258,15 @@ impl HistoryManager {
         Ok(())
     }
 
-    fn get_connection(&self) -> Result<Connection> {
-        Ok(Connection::open(&self.db_path)?)
+    fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub fn checkpoint_wal(&self) -> Result<()> {
+        let conn = self.conn();
+        conn.pragma_update(None, "wal_checkpoint", "TRUNCATE")?;
+        debug!("History database WAL checkpointed");
+        Ok(())
     }
 
     fn map_history_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
@@ -335,36 +349,38 @@ impl HistoryManager {
     fn insert_entry(&self, mut entry: HistoryEntry) -> Result<HistoryEntry> {
         entry.title = self.format_timestamp_title(entry.timestamp);
 
-        let conn = self.get_connection()?;
-        conn.execute(
-            "INSERT INTO transcription_history (
-                file_name,
-                timestamp,
-                saved,
-                title,
-                transcription_text,
-                post_processed_text,
-                post_process_prompt,
-                post_process_requested,
-                source_name,
-                language,
-                language_source
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![
-                &entry.file_name,
-                entry.timestamp,
-                entry.saved,
-                &entry.title,
-                &entry.transcription_text,
-                &entry.post_processed_text,
-                &entry.post_process_prompt,
-                entry.post_process_requested,
-                &entry.source_name,
-                &entry.language,
-                entry.language_source.map(LanguageSource::as_str),
-            ],
-        )?;
-        entry.id = conn.last_insert_rowid();
+        {
+            let conn = self.conn();
+            conn.execute(
+                "INSERT INTO transcription_history (
+                    file_name,
+                    timestamp,
+                    saved,
+                    title,
+                    transcription_text,
+                    post_processed_text,
+                    post_process_prompt,
+                    post_process_requested,
+                    source_name,
+                    language,
+                    language_source
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    &entry.file_name,
+                    entry.timestamp,
+                    entry.saved,
+                    &entry.title,
+                    &entry.transcription_text,
+                    &entry.post_processed_text,
+                    &entry.post_process_prompt,
+                    entry.post_process_requested,
+                    &entry.source_name,
+                    &entry.language,
+                    entry.language_source.map(LanguageSource::as_str),
+                ],
+            )?;
+            entry.id = conn.last_insert_rowid();
+        }
 
         debug!("Saved history entry with id {}", entry.id);
 
@@ -390,34 +406,36 @@ impl HistoryManager {
         language: Option<LanguageDecision>,
     ) -> Result<HistoryEntry> {
         let (language, language_source) = split_language(language);
-        let conn = self.get_connection()?;
-        let updated = conn.execute(
-            "UPDATE transcription_history
-             SET transcription_text = ?1,
-                 post_processed_text = ?2,
-                 post_process_prompt = ?3,
-                 language = ?4,
-                 language_source = ?5
-             WHERE id = ?6",
-            params![
-                transcription_text,
-                post_processed_text,
-                post_process_prompt,
-                language,
-                language_source.map(LanguageSource::as_str),
-                id
-            ],
-        )?;
+        let entry = {
+            let conn = self.conn();
+            let updated = conn.execute(
+                "UPDATE transcription_history
+                 SET transcription_text = ?1,
+                     post_processed_text = ?2,
+                     post_process_prompt = ?3,
+                     language = ?4,
+                     language_source = ?5
+                 WHERE id = ?6",
+                params![
+                    transcription_text,
+                    post_processed_text,
+                    post_process_prompt,
+                    language,
+                    language_source.map(LanguageSource::as_str),
+                    id
+                ],
+            )?;
 
-        if updated == 0 {
-            return Err(anyhow!("History entry {} not found", id));
-        }
+            if updated == 0 {
+                return Err(anyhow!("History entry {} not found", id));
+            }
 
-        let entry = conn.query_row(
-            &format!("SELECT {ENTRY_COLUMNS} FROM transcription_history WHERE id = ?1"),
-            params![id],
-            Self::map_history_entry,
-        )?;
+            conn.query_row(
+                &format!("SELECT {ENTRY_COLUMNS} FROM transcription_history WHERE id = ?1"),
+                params![id],
+                Self::map_history_entry,
+            )?
+        };
 
         debug!("Updated transcription for history entry {}", id);
 
@@ -457,16 +475,19 @@ impl HistoryManager {
             return Ok(0);
         }
 
-        let conn = self.get_connection()?;
+        {
+            let conn = self.conn();
+            for (id, _) in entries {
+                // Delete database entry
+                conn.execute(
+                    "DELETE FROM transcription_history WHERE id = ?1",
+                    params![id],
+                )?;
+            }
+        }
+
         let mut deleted_count = 0;
-
-        for (id, file_name) in entries {
-            // Delete database entry
-            conn.execute(
-                "DELETE FROM transcription_history WHERE id = ?1",
-                params![id],
-            )?;
-
+        for (_, file_name) in entries {
             // Delete WAV file
             let file_path = self.recordings_dir.join(file_name);
             if file_path.exists() {
@@ -483,26 +504,32 @@ impl HistoryManager {
     }
 
     fn cleanup_by_count(&self, limit: usize) -> Result<()> {
-        let conn = self.get_connection()?;
+        let entries_to_delete: Vec<(i64, String)> = {
+            let conn = self.conn();
+            // Unsaved dictations, newest first. Transcribed files are only ever
+            // deleted explicitly, and don't count toward the limit.
+            let mut stmt = conn.prepare(
+                "SELECT id, file_name FROM transcription_history WHERE saved = 0 AND source_name IS NULL ORDER BY timestamp DESC"
+            )?;
 
-        // Unsaved dictations, newest first. Transcribed files are only ever
-        // deleted explicitly, and don't count toward the limit.
-        let mut stmt = conn.prepare(
-            "SELECT id, file_name FROM transcription_history WHERE saved = 0 AND source_name IS NULL ORDER BY timestamp DESC"
-        )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, i64>("id")?, row.get::<_, String>("file_name")?))
+            })?;
 
-        let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>("id")?, row.get::<_, String>("file_name")?))
-        })?;
+            let mut entries: Vec<(i64, String)> = Vec::new();
+            for row in rows {
+                entries.push(row?);
+            }
 
-        let mut entries: Vec<(i64, String)> = Vec::new();
-        for row in rows {
-            entries.push(row?);
-        }
+            if entries.len() > limit {
+                entries[limit..].to_vec()
+            } else {
+                Vec::new()
+            }
+        };
 
-        if entries.len() > limit {
-            let entries_to_delete = &entries[limit..];
-            let deleted_count = self.delete_entries_and_files(entries_to_delete)?;
+        if !entries_to_delete.is_empty() {
+            let deleted_count = self.delete_entries_and_files(&entries_to_delete)?;
 
             if deleted_count > 0 {
                 debug!("Cleaned up {} old history entries by count", deleted_count);
@@ -516,39 +543,43 @@ impl HistoryManager {
         &self,
         retention_period: crate::settings::RecordingRetentionPeriod,
     ) -> Result<()> {
-        let conn = self.get_connection()?;
+        let entries_to_delete: Vec<(i64, String)> = {
+            let conn = self.conn();
+            // Calculate cutoff timestamp (current time minus retention period)
+            let now = Utc::now().timestamp();
+            let cutoff_timestamp = match retention_period {
+                crate::settings::RecordingRetentionPeriod::Days3 => now - (3 * 24 * 60 * 60), // 3 days in seconds
+                crate::settings::RecordingRetentionPeriod::Weeks2 => now - (2 * 7 * 24 * 60 * 60), // 2 weeks in seconds
+                crate::settings::RecordingRetentionPeriod::Months3 => now - (3 * 30 * 24 * 60 * 60), // 3 months in seconds (approximate)
+                _ => unreachable!("Should not reach here"),
+            };
 
-        // Calculate cutoff timestamp (current time minus retention period)
-        let now = Utc::now().timestamp();
-        let cutoff_timestamp = match retention_period {
-            crate::settings::RecordingRetentionPeriod::Days3 => now - (3 * 24 * 60 * 60), // 3 days in seconds
-            crate::settings::RecordingRetentionPeriod::Weeks2 => now - (2 * 7 * 24 * 60 * 60), // 2 weeks in seconds
-            crate::settings::RecordingRetentionPeriod::Months3 => now - (3 * 30 * 24 * 60 * 60), // 3 months in seconds (approximate)
-            _ => unreachable!("Should not reach here"),
+            // Unsaved dictations older than the cutoff; transcribed files are only
+            // ever deleted explicitly.
+            let mut stmt = conn.prepare(
+                "SELECT id, file_name FROM transcription_history WHERE saved = 0 AND source_name IS NULL AND timestamp < ?1",
+            )?;
+
+            let rows = stmt.query_map(params![cutoff_timestamp], |row| {
+                Ok((row.get::<_, i64>("id")?, row.get::<_, String>("file_name")?))
+            })?;
+
+            let mut entries: Vec<(i64, String)> = Vec::new();
+            for row in rows {
+                entries.push(row?);
+            }
+            entries
         };
 
-        // Unsaved dictations older than the cutoff; transcribed files are only
-        // ever deleted explicitly.
-        let mut stmt = conn.prepare(
-            "SELECT id, file_name FROM transcription_history WHERE saved = 0 AND source_name IS NULL AND timestamp < ?1",
-        )?;
+        if !entries_to_delete.is_empty() {
+            let deleted_count = self.delete_entries_and_files(&entries_to_delete)?;
 
-        let rows = stmt.query_map(params![cutoff_timestamp], |row| {
-            Ok((row.get::<_, i64>("id")?, row.get::<_, String>("file_name")?))
-        })?;
-
-        let mut entries_to_delete: Vec<(i64, String)> = Vec::new();
-        for row in rows {
-            entries_to_delete.push(row?);
-        }
-
-        let deleted_count = self.delete_entries_and_files(&entries_to_delete)?;
-
-        if deleted_count > 0 {
-            debug!(
-                "Cleaned up {} old history entries based on retention period",
-                deleted_count
-            );
+            if deleted_count > 0 {
+                debug!(
+                    "Cleaned up {} old history entries based on retention period",
+                    deleted_count
+                );
+            }
         }
 
         Ok(())
@@ -559,7 +590,7 @@ impl HistoryManager {
         cursor: Option<i64>,
         limit: Option<usize>,
     ) -> Result<PaginatedHistory> {
-        let conn = self.get_connection()?;
+        let conn = self.conn();
         let limit = limit.map(|l| l.min(100));
 
         let mut entries: Vec<HistoryEntry> = match (cursor, limit) {
@@ -627,7 +658,7 @@ impl HistoryManager {
     /// Get the latest dictation with non-empty transcription text. Files are
     /// left out: a long file's transcript is never the "last transcript".
     pub fn get_latest_completed_entry(&self) -> Result<Option<HistoryEntry>> {
-        let conn = self.get_connection()?;
+        let conn = self.conn();
         Self::get_latest_completed_entry_with_conn(&conn)
     }
 
@@ -645,23 +676,24 @@ impl HistoryManager {
     }
 
     pub async fn toggle_saved_status(&self, id: i64) -> Result<()> {
-        let conn = self.get_connection()?;
+        {
+            let conn = self.conn();
+            // Get current saved status
+            let current_saved: bool = conn.query_row(
+                "SELECT saved FROM transcription_history WHERE id = ?1",
+                params![id],
+                |row| row.get("saved"),
+            )?;
 
-        // Get current saved status
-        let current_saved: bool = conn.query_row(
-            "SELECT saved FROM transcription_history WHERE id = ?1",
-            params![id],
-            |row| row.get("saved"),
-        )?;
+            let new_saved = !current_saved;
 
-        let new_saved = !current_saved;
+            conn.execute(
+                "UPDATE transcription_history SET saved = ?1 WHERE id = ?2",
+                params![new_saved, id],
+            )?;
 
-        conn.execute(
-            "UPDATE transcription_history SET saved = ?1 WHERE id = ?2",
-            params![new_saved, id],
-        )?;
-
-        debug!("Toggled saved status for entry {}: {}", id, new_saved);
+            debug!("Toggled saved status for entry {}: {}", id, new_saved);
+        }
 
         // Emit history updated event
         if let Err(e) = (HistoryUpdatePayload::Toggled { id }).emit(&self.app_handle) {
@@ -676,7 +708,7 @@ impl HistoryManager {
     }
 
     pub async fn get_entry_by_id(&self, id: i64) -> Result<Option<HistoryEntry>> {
-        let conn = self.get_connection()?;
+        let conn = self.conn();
         let mut stmt = conn.prepare(&format!(
             "SELECT {ENTRY_COLUMNS}
              FROM transcription_history
@@ -689,8 +721,6 @@ impl HistoryManager {
     }
 
     pub async fn delete_entry(&self, id: i64) -> Result<()> {
-        let conn = self.get_connection()?;
-
         // Get the entry to find the file name
         if let Some(entry) = self.get_entry_by_id(id).await? {
             // Delete the audio file first
@@ -703,11 +733,14 @@ impl HistoryManager {
             }
         }
 
-        // Delete from database
-        conn.execute(
-            "DELETE FROM transcription_history WHERE id = ?1",
-            params![id],
-        )?;
+        {
+            let conn = self.conn();
+            // Delete from database
+            conn.execute(
+                "DELETE FROM transcription_history WHERE id = ?1",
+                params![id],
+            )?;
+        }
 
         debug!("Deleted history entry with id: {}", id);
 
@@ -894,5 +927,30 @@ mod tests {
             .expect("completed entry exists");
 
         assert_eq!(entry.transcription_text, "dictated");
+    }
+
+    #[test]
+    fn test_wal_mode_and_checkpoint() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let db_path = temp_dir.path().join("history.db");
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .expect("set wal");
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .expect("set synchronous");
+
+        let mode: String = conn
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .expect("query journal mode");
+        assert_eq!(mode.to_uppercase(), "WAL");
+
+        let sync: i32 = conn
+            .pragma_query_value(None, "synchronous", |row| row.get(0))
+            .expect("query synchronous");
+        // synchronous=NORMAL corresponds to 1 in SQLite
+        assert_eq!(sync, 1);
+
+        conn.pragma_update(None, "wal_checkpoint", "TRUNCATE")
+            .expect("checkpoint");
     }
 }
