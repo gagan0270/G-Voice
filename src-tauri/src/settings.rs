@@ -662,7 +662,11 @@ fn default_word_correction_threshold() -> f64 {
 }
 
 fn default_paste_delay_ms() -> u64 {
-    60
+    // Keystroke injection delay in milliseconds before sending the paste shortcut.
+    // Reduced from 60 to 30 for faster dictation response while remaining conservative
+    // across target applications. Applications differ; users encountering missed pastes
+    // in slower applications can raise this value in settings.
+    30
 }
 
 fn default_paste_delay_after_ms() -> u64 {
