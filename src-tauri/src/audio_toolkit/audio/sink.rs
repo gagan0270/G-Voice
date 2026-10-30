@@ -126,7 +126,7 @@ impl CaptureSink {
             on_levels,
             on_audio,
             ready: Some(ready),
-            samples: Vec::new(),
+            samples: Vec::with_capacity(constants::WHISPER_SAMPLE_RATE as usize * 30),
             heard_sound: false,
         }
     }

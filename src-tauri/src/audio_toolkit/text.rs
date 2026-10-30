@@ -22,9 +22,11 @@ fn build_match_key(word: &str) -> String {
         .collect()
 }
 
+#[derive(Clone)]
 struct CustomWordMatchKey {
     word_index: usize,
     key: String,
+    key_len: usize,
 }
 
 fn build_custom_word_match_keys(word: &str, word_index: usize) -> Vec<CustomWordMatchKey> {
@@ -36,23 +38,55 @@ fn build_custom_word_match_keys(word: &str, word_index: usize) -> Vec<CustomWord
     // scripts. Unicode custom words remain available to models that accept
     // them as native decode prompts; they are simply skipped by this fallback.
     if is_supported_fuzzy_key(&primary_key) {
+        let key_len = primary_key.chars().count();
         keys.push(CustomWordMatchKey {
             word_index,
             key: primary_key.clone(),
+            key_len,
         });
     }
 
     if word.contains('&') {
         let expanded_key = build_match_key(&word.replace('&', " and "));
         if is_supported_fuzzy_key(&expanded_key) && expanded_key != primary_key {
+            let key_len = expanded_key.chars().count();
             keys.push(CustomWordMatchKey {
                 word_index,
                 key: expanded_key,
+                key_len,
             });
         }
     }
 
     keys
+}
+
+type CustomWordKeysCache = Mutex<HashMap<Vec<String>, Arc<Vec<CustomWordMatchKey>>>>;
+
+static CUSTOM_WORD_KEYS_CACHE: Lazy<CustomWordKeysCache> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn get_or_build_custom_word_keys(custom_words: &[String]) -> Arc<Vec<CustomWordMatchKey>> {
+    {
+        let cache = CUSTOM_WORD_KEYS_CACHE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(keys) = cache.get(custom_words) {
+            return Arc::clone(keys);
+        }
+    }
+
+    let keys: Vec<CustomWordMatchKey> = custom_words
+        .iter()
+        .enumerate()
+        .flat_map(|(index, word)| build_custom_word_match_keys(word, index))
+        .collect();
+
+    let arc_keys = Arc::new(keys);
+    let mut cache = CUSTOM_WORD_KEYS_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache.insert(custom_words.to_vec(), Arc::clone(&arc_keys));
+    arc_keys
 }
 
 fn is_supported_fuzzy_key(key: &str) -> bool {
@@ -82,7 +116,11 @@ fn find_best_match<'a>(
     custom_word_match_keys: &[CustomWordMatchKey],
     threshold: f64,
 ) -> Option<(&'a String, f64)> {
-    if !is_supported_fuzzy_key(candidate) || candidate.chars().count() > 50 {
+    if !is_supported_fuzzy_key(candidate) {
+        return None;
+    }
+    let candidate_len = candidate.chars().count();
+    if candidate_len > 50 {
         return None;
     }
 
@@ -93,8 +131,7 @@ fn find_best_match<'a>(
         // Skip if lengths are too different (optimization + prevents over-matching)
         // Use percentage-based check: max 25% length difference (prevents n-grams from
         // matching significantly shorter custom words, e.g., "openaigpt" vs "openai")
-        let candidate_len = candidate.chars().count();
-        let custom_word_len = custom_word_key.key.chars().count();
+        let custom_word_len = custom_word_key.key_len;
         let len_diff = candidate_len.abs_diff(custom_word_len) as f64;
         let max_len = candidate_len.max(custom_word_len) as f64;
         let max_allowed_diff = (max_len * 0.25).max(2.0); // At least 2 chars difference allowed
@@ -154,11 +191,7 @@ pub fn apply_custom_words(text: &str, custom_words: &[String], threshold: f64) -
     }
 
     // Pre-compute normalized comparison keys to avoid repeated allocations.
-    let custom_word_match_keys: Vec<CustomWordMatchKey> = custom_words
-        .iter()
-        .enumerate()
-        .flat_map(|(index, word)| build_custom_word_match_keys(word, index))
-        .collect();
+    let custom_word_match_keys = get_or_build_custom_word_keys(custom_words);
 
     let words: Vec<&str> = text.split_whitespace().collect();
     let mut result = Vec::new();

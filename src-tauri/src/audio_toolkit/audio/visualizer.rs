@@ -118,8 +118,7 @@ impl AudioVisualiser {
             // Calculate average power in this frequency range
             let mut power_sum = 0.0;
             for bin_idx in start_bin..end_bin {
-                let magnitude = self.fft_input[bin_idx].norm();
-                power_sum += magnitude * magnitude;
+                power_sum += self.fft_input[bin_idx].norm_sqr();
             }
 
             let avg_power = power_sum / (end_bin - start_bin) as f32;

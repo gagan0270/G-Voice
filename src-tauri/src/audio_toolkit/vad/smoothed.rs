@@ -17,6 +17,7 @@ pub struct SmoothedVad {
     onset_frames: usize,
 
     frame_buffer: VecDeque<BufferedFrame>,
+    recycled_frames: Vec<Vec<f32>>,
     hangover_counter: usize,
     onset_counter: usize,
     in_speech: bool,
@@ -36,7 +37,8 @@ impl SmoothedVad {
             prefill_frames,
             hangover_frames,
             onset_frames,
-            frame_buffer: VecDeque::new(),
+            frame_buffer: VecDeque::with_capacity(prefill_frames + 2),
+            recycled_frames: Vec::with_capacity(prefill_frames + 2),
             hangover_counter: 0,
             onset_counter: 0,
             in_speech: false,
@@ -53,14 +55,22 @@ impl SmoothedVad {
 
 impl VoiceActivityDetector for SmoothedVad {
     fn push_frame<'a>(&'a mut self, frame: &'a [f32]) -> Result<VadFrame<'a>> {
-        // 1. Buffer every incoming frame for possible pre-roll
+        // 1. Buffer every incoming frame for possible pre-roll, recycling buffer allocations
+        let mut samples = self
+            .recycled_frames
+            .pop()
+            .unwrap_or_else(|| Vec::with_capacity(frame.len()));
+        samples.clear();
+        samples.extend_from_slice(frame);
         self.frame_buffer.push_back(BufferedFrame {
-            samples: frame.to_vec(),
+            samples,
             emitted: false,
             voiced: false,
         });
         while self.frame_buffer.len() > self.prefill_frames + 1 {
-            self.frame_buffer.pop_front();
+            if let Some(old) = self.frame_buffer.pop_front() {
+                self.recycled_frames.push(old.samples);
+            }
         }
 
         // 2. Delegate to the wrapped boolean VAD
@@ -155,7 +165,9 @@ impl VoiceActivityDetector for SmoothedVad {
 
     fn reset(&mut self) {
         self.inner_vad.reset();
-        self.frame_buffer.clear();
+        while let Some(f) = self.frame_buffer.pop_front() {
+            self.recycled_frames.push(f.samples);
+        }
         self.hangover_counter = 0;
         self.onset_counter = 0;
         self.in_speech = false;
