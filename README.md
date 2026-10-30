@@ -36,7 +36,7 @@ Unlike other voice typing tools, **G-Voice runs 100% offline on your device**:
 
 You don't need to install Python, Rust, or any developer tools!
 
-1. Download **`G-Voice-v0.9.8-Windows-x64.zip`** from [Releases](https://github.com/cjpais/Handy/releases).
+1. Download **`G-Voice-v0.9.8-Windows-x64.zip`** from [Releases](https://github.com/gagan0270/G-Voice/releases).
 2. Extract the folder anywhere on your PC (e.g. `C:\Users\<You>\Desktop\G-Voice`).
 3. Double-click **`G-Voice.exe`** to launch!
 
@@ -106,9 +106,11 @@ If you want to modify or contribute to G-Voice:
 Simply double-click **`build.bat`** in the repository root, or run:
 
 ```cmd
-git clone https://github.com/<your-username>/G-Voice.git
+git clone https://github.com/gagan0270/G-Voice.git
 cd G-Voice
-build.bat
+npm install
+npm run build
+npx tauri build --no-bundle
 ```
 
 The script will automatically:
@@ -133,10 +135,7 @@ VOICE/
 │   │   ├── icons/            # Multi-resolution bird icons (.ico, .png)
 │   │   ├── resources/        # Default settings, sounds, tray icons
 │   │   └── transcribe-libs/  # Prebuilt AVX2 / Alder Lake ggml DLLs
-│   ├── build.bat             # One-click Windows build script
 │   └── package.json          # Node dependencies and scripts
-├── build.bat                 # Root build script
-├── deploy_gvoice.ps1         # Desktop deployment script
 └── README.md                 # Documentation
 ```
 
