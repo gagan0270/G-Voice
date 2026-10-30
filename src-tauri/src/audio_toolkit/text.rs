@@ -407,6 +407,54 @@ fn remove_filler_matches(text: &str, pattern: &Regex) -> String {
     kept
 }
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+static COMBINED_FILLER_REGEX_CACHE: Lazy<Mutex<HashMap<Vec<String>, Arc<Regex>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+fn get_or_compile_filler_regex(words: &[String]) -> Option<Arc<Regex>> {
+    if words.is_empty() {
+        return None;
+    }
+
+    let key = words.to_vec();
+    {
+        let cache = COMBINED_FILLER_REGEX_CACHE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(re) = cache.get(&key) {
+            return Some(Arc::clone(re));
+        }
+    }
+
+    // Sort words LONGEST FIRST so longer compounds/words match before prefixes
+    let mut sorted_words = words.to_vec();
+    sorted_words.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+
+    let escaped_parts: Vec<String> = sorted_words
+        .iter()
+        .filter(|w| !w.trim().is_empty())
+        .map(|w| regex::escape(w))
+        .collect();
+
+    if escaped_parts.is_empty() {
+        return None;
+    }
+
+    let pattern_str = format!(r"(?i)\b(?:{})\b[,.]?", escaped_parts.join("|"));
+    let re = Regex::new(&pattern_str).ok().map(Arc::new);
+
+    if let Some(ref regex_arc) = re {
+        let mut cache = COMBINED_FILLER_REGEX_CACHE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.insert(key, Arc::clone(regex_arc));
+    }
+
+    re
+}
+
 /// Removes filler words from transcription output when enabled.
 ///
 /// Built-in removal is two-tiered: [`UNIVERSAL_FILLER_WORDS`] apply regardless
@@ -436,12 +484,13 @@ pub fn remove_filler_words(
         return text.to_string();
     }
 
-    // Build filler patterns from custom list or the built-in tiers
-    let patterns: Vec<Regex> = match custom_filler_words {
-        Some(words) => words
-            .iter()
-            .filter_map(|word| Regex::new(&format!(r"(?i)\b{}\b[,.]?", regex::escape(word))).ok())
-            .collect(),
+    let words: Vec<String> = match custom_filler_words {
+        Some(custom) => {
+            if custom.is_empty() {
+                return text.to_string();
+            }
+            custom.clone()
+        }
         None => UNIVERSAL_FILLER_WORDS
             .iter()
             .chain(
@@ -450,17 +499,15 @@ pub fn remove_filler_words(
                     .map(gated_filler_words_for_language)
                     .unwrap_or_default(),
             )
-            .map(|word| Regex::new(&format!(r"(?i)\b{}\b[,.]?", regex::escape(word))).unwrap())
+            .map(|s| s.to_string())
             .collect(),
     };
 
-    // Remove filler words
-    let mut filtered = text.to_string();
-    for pattern in &patterns {
-        filtered = remove_filler_matches(&filtered, pattern);
+    if let Some(pattern) = get_or_compile_filler_regex(&words) {
+        remove_filler_matches(text, &pattern)
+    } else {
+        text.to_string()
     }
-
-    filtered
 }
 
 /// Applies non-filler transcription cleanup.
@@ -494,6 +541,54 @@ mod tests {
         let language = OutputLanguageEvidence::UserSelected(language.to_string());
         let filtered = remove_filler_words(text, &language, custom_filler_words, true);
         normalize_transcription_output(&filtered)
+    }
+
+    fn legacy_remove_filler_words(
+        text: &str,
+        language: &str,
+        custom_filler_words: &Option<Vec<String>>,
+    ) -> String {
+        let patterns: Vec<Regex> = match custom_filler_words {
+            Some(words) => words
+                .iter()
+                .filter_map(|word| {
+                    Regex::new(&format!(r"(?i)\b{}\b[,.]?", regex::escape(word))).ok()
+                })
+                .collect(),
+            None => UNIVERSAL_FILLER_WORDS
+                .iter()
+                .chain(gated_filler_words_for_language(language))
+                .map(|word| Regex::new(&format!(r"(?i)\b{}\b[,.]?", regex::escape(word))).unwrap())
+                .collect(),
+        };
+
+        let mut filtered = text.to_string();
+        for pattern in &patterns {
+            filtered = remove_filler_matches(&filtered, pattern);
+        }
+        normalize_transcription_output(&filtered)
+    }
+
+    #[test]
+    fn test_filler_removal_combined_matches_legacy() {
+        let test_cases = [
+            "Um, so I think that uh, we should go.",
+            "Uh, um, well, actually maybe.",
+            "This is a test um without hesitation.",
+            "UM, WHAT ABOUT ALL CAPS UH?",
+            "What about... uh... ellipsis?",
+            "No fillers in this sentence at all.",
+            "Hm, okay. Hmm, let me see. Mmm, good.",
+            "Word with uh inside like suh or bruh stays.",
+            "Äh, ich weiß nicht, ähm, vielleicht.",
+            "Euh, je ne sais pas vraiment.",
+        ];
+
+        for text in test_cases {
+            let legacy_out = legacy_remove_filler_words(text, "en", &None);
+            let new_out = filter_transcription_output(text, "en", &None);
+            assert_eq!(new_out, legacy_out, "Mismatch on test case: '{}'", text);
+        }
     }
 
     #[test]
