@@ -3,6 +3,25 @@
 > **The Fastest, 100% Private Offline AI Voice Typing for Windows**  
 > *Created & Developed by **Gagan V***
 
+<p align="center">
+  <a href="https://github.com/gagan0270/G-Voice/releases/download/v0.9.8/G-Voice-Setup.exe">
+    <img src="https://img.shields.io/badge/Download-Windows_Installer_(.exe)-2ea44f?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows Installer" />
+  </a>
+  <a href="https://github.com/gagan0270/G-Voice/releases/download/v0.9.8/G-Voice-v0.9.8-Windows-x64.zip">
+    <img src="https://img.shields.io/badge/Download-Portable_Zip_(x64)-0969da?style=for-the-badge&logo=windows&logoColor=white" alt="Download Portable Zip" />
+  </a>
+  <a href="https://github.com/gagan0270/G-Voice/releases/download/v0.9.8/G-Voice.exe">
+    <img src="https://img.shields.io/badge/Download-Standalone_App_(.exe)-6e5494?style=for-the-badge&logo=windows&logoColor=white" alt="Download Standalone App" />
+  </a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/gagan0270/G-Voice?color=brightgreen&label=Latest%20Version" alt="Release Version" />
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20(64--bit)-blue" alt="Windows Support" />
+  <img src="https://img.shields.io/badge/Offline-100%25%20Private-success" alt="100% Offline" />
+  <img src="https://img.shields.io/badge/License-MIT-orange" alt="MIT License" />
+</p>
+
 ---
 
 ## 🌟 What is G-Voice?
@@ -32,13 +51,21 @@ Unlike other voice typing tools, **G-Voice runs 100% offline on your device**:
 
 ---
 
-## 📦 For End Users: How to Run
+## 📦 For End Users: Direct Downloads
 
-You don't need to install Python, Rust, or any developer tools!
+You don't need to install Python, Rust, Node.js, or any developer tools!
 
-1. Download **`G-Voice-v0.9.8-Windows-x64.zip`** from [Releases](https://github.com/gagan0270/G-Voice/releases).
-2. Extract the folder anywhere on your PC (e.g. `C:\Users\<You>\Desktop\G-Voice`).
-3. Double-click **`G-Voice.exe`** to launch!
+### 📥 1-Click Downloads (Latest v0.9.8)
+
+| Download Type | File | Description | Best For |
+| :--- | :--- | :--- | :--- |
+| 🚀 **Windows Installer** *(Recommended)* | [**G-Voice-Setup.exe**](https://github.com/gagan0270/G-Voice/releases/download/v0.9.8/G-Voice-Setup.exe) (10.5 MB) | Full setup wizard, creates desktop & Start Menu shortcuts, auto-starts with Windows | **Most Users** |
+| 💼 **Portable Package** | [**G-Voice-v0.9.8-Windows-x64.zip**](https://github.com/gagan0270/G-Voice/releases/download/v0.9.8/G-Voice-v0.9.8-Windows-x64.zip) (17.1 MB) | Zero installation, extract to any folder and double-click G-Voice.exe | USB drives / portable use |
+| ⚡ **Standalone Binary** | [**G-Voice.exe**](https://github.com/gagan0270/G-Voice/releases/download/v0.9.8/G-Voice.exe) (29.1 MB) | Direct standalone executable | Advanced users |
+
+### 🚀 How to Run
+- **If you downloaded G-Voice-Setup.exe**: Double-click the installer and follow the setup wizard. G-Voice installs to your PC and runs quietly in your system tray!
+- **If you downloaded G-Voice-v0.9.8-Windows-x64.zip**: Extract the zip anywhere and double-click G-Voice.exe.
 
 ### 🧙‍♂️ First-Time Setup Wizard (Automatic)
 When you launch G-Voice for the first time:
